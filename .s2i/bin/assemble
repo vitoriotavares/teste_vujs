@@ -14,9 +14,7 @@ yarn -v
 
 
 pushd /tmp/src || exit 1
-
 yarn install 
-
 popd
 
 if [ -x "$ASSEMBLE_SCRIPT" ]; then
