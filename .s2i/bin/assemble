@@ -1,22 +1,55 @@
-#!/bin/bash
+#!/bin/bash -e
 
-ASSEMBLE_SCRIPT="/usr/libexec/s2i/assemble"
-
-export PATH=$PATH:/opt/app-root/node_modules/.bin
-
-cd ..
-npm install yarn
-cd src
-
-node -v
-npm -v
-yarn -v
-
-
-pushd /tmp/src || exit 1
-yarn install 
-popd
-
-if [ -x "$ASSEMBLE_SCRIPT" ]; then
-	$ASSEMBLE_SCRIPT
+# If the 's2i-angular-httpd24' assemble script is executed with the '-h' flag,
+# print the usage.
+if [[ "$1" == "-h" ]]; then
+	exec /usr/libexec/s2i/usage
 fi
+
+echo "---> Running the httpd-24 assemble script..."
+/usr/libexec/s2i/assemble-httpd
+echo "---> Done running the httpd-24 assemble script"
+
+# if [ "$(ls /tmp/ng-environments/ 2>/dev/null)" ]; then
+#   echo "---> Copying custom Angular environment files"
+#   cp -pf /tmp/ng-environments/* ./src/environments/
+# fi
+
+# Change the npm registry mirror if provided. This variable matches the
+# one used in s2i-nodejs.
+# if [ -n "$NPM_MIRROR" ]; then
+#   scl enable "rh-nodejs$NODEJS_VERSION" 'npm config set registry $NPM_MIRROR'
+# fi
+
+# The base image already copied the source files the home directory,
+# so we can skip that step
+echo "---> Installing the Yarn dependencies (including dev)"
+scl enable "rh-nodejs$NODEJS_VERSION" 'yarn install'
+scl enable "rh-nodejs$NODEJS_VERSION" 'yarn install --only=dev'
+
+echo "---> Building and installing the Vue application with the configuration"
+scl enable "rh-nodejs$NODEJS_VERSION" "yarn build"
+# Delete all source files since they are no longer needed
+find -maxdepth 1 -not -name "dist" -not -name "." -exec rm -rf {} \;
+# Move the build files to the source root
+mv dist/* .
+# Remove the now empty dist directory
+rmdir dist
+
+# Taken from
+# https://github.com/sclorg/s2i-nodejs-container/blob/ceda3ffc6222256859ce39200edd1ced1758f43e/10/s2i/bin/assemble#L99
+# Clear the npm's cache and tmp directories only if they are not mounted volumes
+NPM_CACHE=$(scl enable "rh-nodejs$NODEJS_VERSION" 'npm config get cache')
+if ! mountpoint $NPM_CACHE; then
+  echo "---> Cleaning the npm cache $NPM_CACHE"
+  #As of npm@5 even the 'npm cache clean --force' does not fully remove the cache directory
+  rm $NPM_CACHE* -rf
+fi
+NPM_TMP=$(scl enable "rh-nodejs$NODEJS_VERSION" 'npm config get tmp')
+if ! mountpoint $NPM_TMP; then
+  echo "---> Cleaning the $NPM_TMP/npm-*"
+  rm -rf $NPM_TMP/npm-*
+fi
+
+# Fix source directory permissions
+fix-permissions ./
